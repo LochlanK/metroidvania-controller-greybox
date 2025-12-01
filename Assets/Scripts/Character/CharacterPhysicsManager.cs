@@ -58,7 +58,7 @@ public class CharacterPhysicsManager : MonoBehaviour
     /// <summary>
     /// Run this in Update.
     /// </summary>
-    public void JumpChecks(bool jumpPressed, bool jumpReleased)
+    public void JumpChecks(bool jumpPressed, bool jumpHeld, bool jumpReleased)
     {
         //When pressed - passed in by Character.cs
         if (jumpPressed)
@@ -109,7 +109,7 @@ public class CharacterPhysicsManager : MonoBehaviour
             InitiateJump(1);
         }
         //Jump case where falling from ledge
-        else if (jumpBufferTimer > 0f && isFalling && jumpsUsedCounter < movementStats.NumberOfJumpsAllowed)
+        else if (jumpBufferTimer > 0f && isFalling && jumpsUsedCounter < movementStats.NumberOfJumpsAllowed - 1)
         {
             InitiateJump(2);
             isFastFalling = false;
@@ -155,16 +155,108 @@ public class CharacterPhysicsManager : MonoBehaviour
 
     private void Jump()
     {
-        
+        //Apply gravity during jump
+        if (isJumping)
+        {
+            //check for head bump
+            if (bumpedHead)
+            {
+                isFastFalling = true;
+            }
+        }
+
+        //gravity ascending
+        if(VerticalVelocity >= 0f)
+        {
+            apexPoint = Mathf.InverseLerp(movementStats.InitialJumpVelocity, 0f, VerticalVelocity);
+            if (apexPoint > movementStats.ApexThreshold)
+            {
+                if (!isPastApexThreshold)
+                {
+                    isPastApexThreshold = true;
+                    timePastApexThreshold = 0f;
+                }
+
+                if (isPastApexThreshold)
+                {
+                    timePastApexThreshold += Time.fixedDeltaTime;
+                    if(timePastApexThreshold < movementStats.ApexHangTime)
+                    {
+                        VerticalVelocity = 0f;
+                    }
+                    else
+                    {
+                        VerticalVelocity = -0.01f;
+                    }
+                }
+
+            }
+            //Gravity on ascending but not past the threshold
+            else
+            {
+                VerticalVelocity += movementStats.Gravity * Time.fixedDeltaTime;
+                if (isPastApexThreshold)
+                {
+                    isPastApexThreshold = false;
+                }
+            }
+        }
+
+        //Gravity on Descent
+        else if (!isFastFalling)
+        {
+            VerticalVelocity += movementStats.Gravity * movementStats.GravityOnReleaseMultiplier * Time.fixedDeltaTime;
+        }
+
+        else if (VerticalVelocity < 0f)
+        {
+            if (!isFalling)
+            {
+                isFalling = true;
+            }
+        }
+
+        //Jump Cut
+
+        if (isFastFalling)
+        {
+            if(fastFallTime >= movementStats.TimeForUpwardCancel)
+            {
+                VerticalVelocity += movementStats.Gravity * movementStats.GravityOnReleaseMultiplier * Time.fixedDeltaTime;
+            }
+            else if (fastFallTime < movementStats.TimeForUpwardCancel){
+                VerticalVelocity = Mathf.Lerp(fastFallReleaseSpeed, 0f, (fastFallTime/movementStats.TimeForUpwardCancel));
+            }
+            fastFallTime += Time.fixedDeltaTime;
+        }
+
+        //normal gravity while falling off ledge
+        if (!isGrounded && !isJumping)
+        {
+            if (!isFalling)
+            {
+                isFalling = true;
+            }
+            VerticalVelocity += movementStats.Gravity * Time.fixedDeltaTime;
+        }
+
+        //clamp falling speeds
+        //Need to expose 100f as a variable if needing to go above it or have different values per level.
+        VerticalVelocity = Mathf.Clamp(VerticalVelocity, -movementStats.MaxFallSpeed, 100f);
+
+        //apply to rigidbody.
+        rb2D.linearVelocity = new Vector2(rb2D.linearVelocity.x, VerticalVelocity);
+
     }
 
     //Call from character.cs to update the input values for the physics manager.
-    public void UpdateMovementInput(Vector2 cartesianInput, bool sprinting)
+    public void UpdateMovementInput(Vector2 cartesianInput, bool sprinting = false)
     {
         moveInput = cartesianInput;
+        isSprinting = sprinting;
     }
 
-    //immutable return to check if facing right or is grounded.
+    //immutable return to check if facing right or is grounded. Probably add more later for unpacking.
     public (bool grounded, bool facingRight) ProcessPhysics()
     {
         CollisionChecks();
@@ -186,9 +278,9 @@ public class CharacterPhysicsManager : MonoBehaviour
     private void Move(float acceleration, float deceleration)
     {
         TurnCheck();
+        Vector2 targetHorizontalVelocity = Vector2.zero;
         if(moveInput != Vector2.zero)
         {
-            Vector2 targetHorizontalVelocity = Vector2.zero;
             if (isSprinting)
             {
                 targetHorizontalVelocity = new Vector2(moveInput.x, 0f) * movementStats.MaxRunSpeed;
@@ -199,12 +291,12 @@ public class CharacterPhysicsManager : MonoBehaviour
             }
 
             moveVelocity = Vector2.Lerp(moveVelocity, targetHorizontalVelocity, acceleration * Time.fixedDeltaTime);
-            rb2D.velocity = new Vector2(moveVelocity, rb2D.velocity.y);
+            rb2D.linearVelocity = new Vector2(moveVelocity.x, rb2D.linearVelocity.y);
         }
         else if (moveInput == Vector2.zero)
         {
-            moveVelocity = Vector2.Lerp(moveVelocity, targetHorizontalVelocity, deceleration * Time.fixedDeltaTime);
-            rb2D.velocity = new Vector2(moveVelocity, rb2D.velocity.y);
+            moveVelocity = Vector2.Lerp(moveVelocity, Vector2.zero, deceleration * Time.fixedDeltaTime);
+            rb2D.linearVelocity = new Vector2(moveVelocity.x, rb2D.linearVelocity.y);
         }
     }
 
@@ -267,15 +359,47 @@ public class CharacterPhysicsManager : MonoBehaviour
 
         }
 
+    }
 
+    private void BumpedHead()
+    {
+        Vector2 boxCastOrigin = new Vector2(footCollider.bounds.center.x, bodyCollider.bounds.max.y);
+        Vector2 boxCastSize = new Vector2(footCollider.bounds.size.x * movementStats.HeadWidth, movementStats.HeadDetectionRayLength);
+        headHit = Physics2D.BoxCast(boxCastOrigin, boxCastSize, 0f, Vector2.up, movementStats.HeadDetectionRayLength, movementStats.GroundedLayer);
+        if (headHit.collider != null)
+        {
+            bumpedHead = true;
+        }
+        else
+        {
+            bumpedHead = false;
+        }
 
+        if (movementStats.DebugShowHeadBumpBox)
+        {
+            float headWidth = movementStats.HeadWidth;
+            Color rayColor;
+            if (bumpedHead)
+            {
+                rayColor = Color.green;
+            }
+            else
+            {
+                rayColor = Color.red;
+            }
 
+            //Draw Gizmos
+            Debug.DrawRay(new Vector2(boxCastOrigin.x - boxCastSize.x / 2 * headWidth, boxCastOrigin.y), Vector2.up * movementStats.HeadDetectionRayLength,rayColor);
+            Debug.DrawRay(new Vector2(boxCastOrigin.x + (boxCastSize.x / 2) * headWidth, boxCastOrigin.y), Vector2.up * movementStats.GroundDetectionRayLength,rayColor);
+            Debug.DrawRay(new Vector2(boxCastOrigin.x - boxCastSize.x / 2 * headWidth, boxCastOrigin.y + movementStats.HeadDetectionRayLength), Vector2.right * boxCastSize.x * headWidth,rayColor);
 
+        }
     }
 
     private void CollisionChecks()
     {
         IsGrounded();
+        BumpedHead();
     }
 
 
