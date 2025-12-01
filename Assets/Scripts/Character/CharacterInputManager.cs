@@ -31,18 +31,32 @@ public class CharacterInputManager
         playerControls.Disable();
     }
 
-    public bool CheckJump()
+    public (bool pressed, bool held, bool released) CheckJumpInput()
     {
+        var jump = playerControls.Player.Jump;
 
-        //just return false for now.
-        return false;
+        bool pressed = jump.WasPressedThisFrame();
+        bool held = jump.IsPressed();
+        bool released = jump.WasReleasedThisFrame();
+
+        return (pressed, held, released);
+    }
+
+    public (bool pressed, bool held, bool released) CheckSprintInput()
+    {
+        var sprint = playerControls.Player.Sprint;
+
+        bool pressed = sprint.WasPressedThisFrame();
+        bool held = sprint.IsPressed();
+        bool released = sprint.WasReleasedThisFrame();
+
+        return (pressed, held, released);
     }
 
     //Returns the Input of the Cartesian Movement with InputHandling.
-    public Vector2 CartesianMovement()
+    public Vector2 GetCartesianMovement()
     {
-        //just return zero for now.
-        return Vector2.zero;
+        return playerControls.Player.Move.ReadValue<Vector2>();
     }
 
 
