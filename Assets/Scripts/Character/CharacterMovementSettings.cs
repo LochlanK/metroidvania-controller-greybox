@@ -2,7 +2,7 @@ using UnityEngine;
 
 public class CharacterMovementSettings : MonoBehaviour
 {
-    [SerializeField] ScriptableMovementStats movementStats;
+    [SerializeField] private ScriptableMovementStats movementStats;
 
     [Header("Debug")]
     public bool DebugShowIsGroundedBox;
@@ -19,6 +19,7 @@ public class CharacterMovementSettings : MonoBehaviour
     //Just to hide these in the inspector.
     public float Gravity { get; private set; }
     public float InitialJumpVelocity { get; private set; }
+    public float AdjustedJump {get; private set;}
 
     void OnValidate()
     {
@@ -34,7 +35,8 @@ public class CharacterMovementSettings : MonoBehaviour
     {
         if(!movementStats) return;
         //we're loading directly from the SO.
-        Gravity = -(2f * movementStats.JumpHeight) / Mathf.Pow(movementStats.TimeTilJumpApex, 2f);
+        AdjustedJump = movementStats.JumpHeight * movementStats.JumpHeightCompensationFactor;
+        Gravity = -(2f * AdjustedJump) / Mathf.Pow(movementStats.TimeTilJumpApex, 2f);
         InitialJumpVelocity = Mathf.Abs(Gravity) * movementStats.TimeTilJumpApex;
     }
 
